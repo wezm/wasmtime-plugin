@@ -1,13 +1,13 @@
 /// Error returned by WasmPlugin when loading plugins or calling functions.
 pub enum WasmPluginError {
     /// A problem compiling the plugin's WASM source
-    WasmerCompileError(wasmer::CompileError),
+    WasmerCompileError(anyhow::Error),
     /// A problem instantiating the Wasmer runtime
-    WasmerInstantiationError(wasmer::InstantiationError),
+    WasmerInstantiationError(anyhow::Error),
     /// A problem interacting with the plugin
-    WasmerRuntimeError(wasmer::RuntimeError),
+    WasmerRuntimeError(anyhow::Error),
     /// A problem getting an export from the plugin
-    WasmerExportError(wasmer::ExportError),
+    WasmerExportError(anyhow::Error),
     /// A problem loading the plugin's source from disk
     IoError(std::io::Error),
     /// A problems serializing an argument to send to one of the plugin's
@@ -51,30 +51,6 @@ impl core::fmt::Display for WasmPluginError {
 impl From<std::io::Error> for WasmPluginError {
     fn from(e: std::io::Error) -> WasmPluginError {
         WasmPluginError::IoError(e)
-    }
-}
-
-impl From<wasmer::CompileError> for WasmPluginError {
-    fn from(e: wasmer::CompileError) -> WasmPluginError {
-        WasmPluginError::WasmerCompileError(e)
-    }
-}
-
-impl From<wasmer::InstantiationError> for WasmPluginError {
-    fn from(e: wasmer::InstantiationError) -> WasmPluginError {
-        WasmPluginError::WasmerInstantiationError(e)
-    }
-}
-
-impl From<wasmer::RuntimeError> for WasmPluginError {
-    fn from(e: wasmer::RuntimeError) -> WasmPluginError {
-        WasmPluginError::WasmerRuntimeError(e)
-    }
-}
-
-impl From<wasmer::ExportError> for WasmPluginError {
-    fn from(e: wasmer::ExportError) -> WasmPluginError {
-        WasmPluginError::WasmerExportError(e)
     }
 }
 
