@@ -75,8 +75,8 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use wasmer::{Exports, Function, Instance, LazyInit, Memory, MemoryView, Module, Store, WasmerEnv};
-pub use wasmer::{Extern, HostFunction};
+use wasmtime::{Func, Instance, Memory, Module, Store, Engine, Linker, Caller, TypedFunc, AsContextMut};
+pub use wasmtime::{Extern};
 
 #[allow(missing_docs)]
 pub mod errors;
@@ -84,6 +84,8 @@ pub mod errors;
 pub mod serialization;
 use bitfield::bitfield;
 use serialization::{Deserializable, Serializable};
+use once_cell::sync::{Lazy, OnceCell};
+use crate::errors::WasmPluginError;
 
 bitfield! {
     #[doc(hidden)]
@@ -94,15 +96,15 @@ bitfield! {
     len, set_len: 63, 32;
 }
 
-#[derive(WasmerEnv, Clone)]
+#[derive(Clone)]
 struct Env<C>
 where
     C: Send + Sync + Clone + 'static,
 {
-    #[wasmer(export(name = "allocate_message_buffer"))]
-    allocator: LazyInit<Function>,
-    #[wasmer(export)]
-    memory: LazyInit<Memory>,
+    // #[wasmtime(export(name = "allocate_message_buffer"))]
+    allocator: Option<TypedFunc<u32, u32>>,
+    // #[wasmtime(export)]
+    memory: Option<Memory>,
     garbage: Arc<Mutex<Vec<FatPointer>>>,
     ctx: C,
 }
@@ -110,20 +112,21 @@ where
 impl<C: Send + Sync + Clone + 'static> Env<C> {
     fn new(garbage: Arc<Mutex<Vec<FatPointer>>>, ctx: C) -> Self {
         Self {
-            allocator: Default::default(),
-            memory: Default::default(),
+            allocator: None,
+            memory: None,
+            // allocator: Default::default(),
+            // memory: Default::default(),
             garbage,
             ctx,
         }
     }
 
+    // A new message buffer from this Env
     fn message_buffer(&self) -> MessageBuffer {
-        unsafe {
-            MessageBuffer {
-                allocator: self.allocator.get_unchecked(),
-                memory: self.memory.get_unchecked(),
-                garbage: vec![],
-            }
+        MessageBuffer {
+            allocator: self.allocator.as_ref().unwrap(), // FIXME: these were get_unchecked
+            memory: self.memory.as_ref().unwrap(),
+            garbage: vec![],
         }
     }
 }
@@ -131,8 +134,8 @@ impl<C: Send + Sync + Clone + 'static> Env<C> {
 /// Constructs a WasmPlugin
 pub struct WasmPluginBuilder {
     module: Module,
-    store: Store,
-    env: Exports,
+    store: Store<Env<()>>,
+    env: Linker<Env<()>>,
     // TODO: Can we do this without the lock?
     garbage: Arc<Mutex<Vec<FatPointer>>>,
 }
@@ -145,37 +148,40 @@ impl WasmPluginBuilder {
 
     /// Load a plugin from WASM source and prepare it for use.
     pub fn from_source(source: &[u8]) -> errors::Result<Self> {
-        let store = Store::default();
-        let module = Module::new(&store, source)?;
-        let mut env = wasmer::Exports::new();
+        let engine = Engine::default();
+        let mut linker = Linker::new(&engine);
+        linker.allow_shadowing(true); // FIXME: Keep this?
+        let module = Module::new(&engine, source)
+            .map_err(WasmPluginError::WasmerCompileError)?;
         let garbage: Arc<Mutex<Vec<FatPointer>>> = Default::default();
-        env.insert(
-            "abort",
-            Function::new_native(&store, |_: u32, _: u32, _: i32, _: i32| {}),
-        );
+        let mut store = Store::new(&engine, Env::new(Arc::clone(&garbage), ()));
+        // let mut env = wasmtime::Exports::new();
+        linker.func_wrap("", "abort", |_: u32, _: u32, _: i32, _: i32| {}).unwrap(); // FIXME note;
+
         #[cfg(feature = "inject_getrandom")]
         {
-            env.insert(
-                "__getrandom",
-                Function::new_native_with_env(
-                    &store,
-                    Env::new(garbage.clone(), ()),
-                    getrandom_shim,
-                ),
-            );
+            // TODO: FIXME
+            // env.insert(
+            //     "__getrandom",
+            //     Function::new_native_with_env(
+            //         &store,
+            //         Env::new(garbage.clone(), ()),
+            //         getrandom_shim,
+            //     ),
+            // );
         }
 
         Ok(Self {
             module,
             store,
-            env,
+            env: linker,
             garbage,
         })
     }
 
     fn import(mut self, name: impl ToString, value: impl Into<Extern>) -> Self {
-        let name = format!("wasm_plugin_imported__{}", name.to_string());
-        self.env.insert(name, value);
+        let name = format!("wasm_plugin_imported__{}", name.to_string()); // TODO: Use module name instead of adding prefix
+        self.env.define("", &name, value).unwrap(); // FIXME note unwrap
         self
     }
 
@@ -193,131 +199,130 @@ impl WasmPluginBuilder {
     /// in removing that limitation and when they do this method will be
     /// removed in favor of `import_function' since context can be more
     /// idiomatically handled with captured values.
-    pub fn import_function_with_context<
-        Args,
-        F: ImportableFnWithContext<C, Args> + Send + 'static,
-        C: Send + Sync + Clone + 'static,
-    >(
-        self,
-        name: impl ToString,
-        ctx: C,
-        value: F,
-    ) -> Self {
-        let env = Env::new(self.garbage.clone(), ctx);
-
-        if F::has_arg() {
-            let f = if F::has_return() {
-                let wrapped = move |env: &Env<C>, ptr: u32, len: u32| -> u64 {
-                    let mut buffer = env.message_buffer();
-                    let r = value
-                        .call_with_input(&mut buffer, ptr as usize, len as usize, &env.ctx)
-                        .unwrap()
-                        .map(|p| p.0)
-                        .unwrap_or(0);
-                    env.garbage.lock().unwrap().extend(buffer.garbage.drain(..));
-                    r
-                };
-                Function::new_native_with_env(&self.store, env, wrapped)
-            } else {
-                let wrapped = move |env: &Env<C>, ptr: u32, len: u32| {
-                    let mut buffer = env.message_buffer();
-                    value
-                        .call_with_input(&mut buffer, ptr as usize, len as usize, &env.ctx)
-                        .unwrap();
-                    env.garbage.lock().unwrap().extend(buffer.garbage.drain(..));
-                };
-                Function::new_native_with_env(&self.store, env, wrapped)
-            };
-            self.import(name, f)
-        } else {
-            let f = if F::has_return() {
-                let wrapped = move |env: &Env<C>| -> u64 {
-                    let mut buffer = env.message_buffer();
-                    let r = value
-                        .call_without_input(&mut buffer, &env.ctx)
-                        .unwrap()
-                        .map(|p| p.0)
-                        .unwrap_or(0);
-                    env.garbage.lock().unwrap().extend(buffer.garbage.drain(..));
-                    r
-                };
-                Function::new_native_with_env(&self.store, env, wrapped)
-            } else {
-                let wrapped = move |env: &Env<C>| {
-                    let mut buffer = env.message_buffer();
-                    value.call_without_input(&mut buffer, &env.ctx).unwrap();
-                    env.garbage.lock().unwrap().extend(buffer.garbage.drain(..));
-                };
-                Function::new_native_with_env(&self.store, env, wrapped)
-            };
-            self.import(name, f)
-        }
-    }
+    // pub fn import_function_with_context<
+    //     Args,
+    //     F: ImportableFnWithContext<C, Args> + Send + 'static,
+    //     C: Send + Sync + Clone + 'static,
+    // >(
+    //     mut self,
+    //     name: impl ToString,
+    //     ctx: C,
+    //     value: F,
+    // ) -> Self {
+    //     if F::has_arg() {
+    //         let f = if F::has_return() {
+    //             let wrapped = move |env: Caller<'_, Env<C>>, ptr: u32, len: u32| -> u64 {
+    //                 let mut buffer = env.data().message_buffer();
+    //                 let r = value
+    //                     .call_with_input(&mut buffer, ptr as usize, len as usize, &ctx)
+    //                     .unwrap()
+    //                     .map(|p| p.0)
+    //                     .unwrap_or(0);
+    //                 env.data().garbage.lock().unwrap().extend(buffer.garbage.drain(..));
+    //                 r
+    //             };
+    //             Func::wrap(&mut self.store, wrapped)
+    //         } else {
+    //             let wrapped = move |env: Caller<'_, Env<C>>, ptr: u32, len: u32| {
+    //                 let mut buffer = env.data().message_buffer();
+    //                 value
+    //                     .call_with_input(&mut buffer, ptr as usize, len as usize, &ctx)
+    //                     .unwrap();
+    //                 env.data().garbage.lock().unwrap().extend(buffer.garbage.drain(..));
+    //             };
+    //             Func::wrap(&mut self.store, wrapped)
+    //         };
+    //         self.import(name, f)
+    //     } else {
+    //         let f = if F::has_return() {
+    //             let wrapped = move |env: Caller<'_, Env<C>>| -> u64 {
+    //                 let mut buffer = env.data().message_buffer();
+    //                 let r = value
+    //                     .call_without_input(&mut buffer, &ctx)
+    //                     .unwrap()
+    //                     .map(|p| p.0)
+    //                     .unwrap_or(0);
+    //                 env.data().garbage.lock().unwrap().extend(buffer.garbage.drain(..));
+    //                 r
+    //             };
+    //             Func::wrap(&mut self.store, wrapped)
+    //         } else {
+    //             let wrapped = move |env: Caller<'_, Env<C>>| {
+    //                 let mut buffer = env.data().message_buffer();
+    //                 value.call_without_input(&mut buffer, &ctx).unwrap();
+    //                 env.data().garbage.lock().unwrap().extend(buffer.garbage.drain(..));
+    //             };
+    //             Func::wrap(&mut self.store, wrapped)
+    //         };
+    //         self.import(name, f)
+    //     }
+    // }
 
     /// Import a function defined in the host into the guest. The function's
     /// arguments and return type must all be serializable.
-    pub fn import_function<Args, F: ImportableFn<Args> + Send + 'static>(
-        self,
+    pub fn import_function<Args, F: ImportableFn<Args> + Send + Sync + 'static>(
+        mut self,
         name: impl ToString,
         value: F,
     ) -> Self {
-        let env = Env::new(self.garbage.clone(), ());
-
         if F::has_arg() {
             let f = if F::has_return() {
-                let wrapped = move |env: &Env<()>, ptr: u32, len: u32| -> u64 {
-                    let mut buffer = env.message_buffer();
+                let wrapped = move |env: Caller<'_, Env<()>>, ptr: u32, len: u32| -> u64 {
+                    let mut buffer = env.data().message_buffer();
                     let r = value
                         .call_with_input(&mut buffer, ptr as usize, len as usize)
                         .unwrap()
                         .map(|p| p.0)
                         .unwrap_or(0);
-                    env.garbage.lock().unwrap().extend(buffer.garbage.drain(..));
+                    env.data().garbage.lock().unwrap().extend(buffer.garbage.drain(..));
                     r
                 };
-                Function::new_native_with_env(&self.store, env, wrapped)
+                Func::wrap(&mut self.store, wrapped)
             } else {
-                let wrapped = move |env: &Env<()>, ptr: u32, len: u32| {
-                    let mut buffer = env.message_buffer();
+                let wrapped = move |env: Caller<'_, Env<()>>, ptr: u32, len: u32| {
+                    let mut buffer = env.data().message_buffer();
                     value
                         .call_with_input(&mut buffer, ptr as usize, len as usize)
                         .unwrap();
-                    env.garbage.lock().unwrap().extend(buffer.garbage.drain(..));
+                    env.data().garbage.lock().unwrap().extend(buffer.garbage.drain(..));
                 };
-                Function::new_native_with_env(&self.store, env, wrapped)
+                Func::wrap(&mut self.store, wrapped)
             };
             self.import(name, f)
         } else {
             let f = if F::has_return() {
-                let wrapped = move |env: &Env<()>| -> u64 {
-                    let mut buffer = env.message_buffer();
+                let wrapped = move |env: Caller<'_, Env<()>>| -> u64 {
+                    let mut buffer = env.data().message_buffer();
                     let r = value
                         .call_without_input(&mut buffer)
                         .unwrap()
                         .map(|p| p.0)
                         .unwrap_or(0);
-                    env.garbage.lock().unwrap().extend(buffer.garbage.drain(..));
+                    env.data().garbage.lock().unwrap().extend(buffer.garbage.drain(..));
                     r
                 };
-                Function::new_native_with_env(&self.store, env, wrapped)
+                Func::wrap(&mut self.store, wrapped)
             } else {
-                let wrapped = move |env: &Env<()>| {
-                    let mut buffer = env.message_buffer();
+                let wrapped = move |env: Caller<'_, Env<()>>| {
+                    let mut buffer = env.data().message_buffer();
                     value.call_without_input(&mut buffer).unwrap();
-                    env.garbage.lock().unwrap().extend(buffer.garbage.drain(..));
+                    env.data().garbage.lock().unwrap().extend(buffer.garbage.drain(..));
                 };
-                Function::new_native_with_env(&self.store, env, wrapped)
+                Func::wrap(&mut self.store, wrapped)
             };
             self.import(name, f)
         }
     }
 
     /// Finalize the builder and create the WasmPlugin ready for use.
-    pub fn finish(self) -> errors::Result<WasmPlugin> {
-        let mut import_object = wasmer::ImportObject::new();
-        import_object.register("env", self.env);
+    pub fn finish(mut self) -> errors::Result<WasmPlugin> {
+        // let mut import_object = wasmtime::ImportObject::new();
+        // import_object.register("env", self.env);
+        let instance = self.env.instantiate(&mut self.store, &self.module)
+            .map_err(WasmPluginError::WasmerInstantiationError)?;
         Ok(WasmPlugin {
-            instance: Instance::new(&self.module, &import_object)?,
+            store: self.store,
+            instance,
             garbage: self.garbage,
         })
     }
@@ -519,8 +524,8 @@ where
 }
 
 /// A loaded plugin
-#[derive(Clone, Debug)]
 pub struct WasmPlugin {
+    store: Store<Env<()>>,
     instance: Instance,
     garbage: Arc<Mutex<Vec<FatPointer>>>,
 }
@@ -528,20 +533,21 @@ pub struct WasmPlugin {
 #[doc(hidden)]
 pub struct MessageBuffer<'a> {
     memory: &'a Memory,
-    allocator: &'a Function,
+    allocator: &'a TypedFunc<u32, u32>,
     garbage: Vec<FatPointer>,
 }
 
 impl<'a> MessageBuffer<'a> {
-    fn write_message(&mut self, message: &[u8]) -> FatPointer {
+    fn write_message<S: AsContextMut>(&mut self, message: &[u8], store: S) -> FatPointer {
         let len = message.len() as u32;
 
-        let ptr = self
-            .allocator
-            .native::<u32, u32>()
-            .unwrap()
-            .call(len as u32)
-            .unwrap();
+        // let ptr = self
+        //     .allocator
+        //     .native::<u32, u32>()
+        //     .unwrap()
+        //     .call(len as u32)
+        //     .unwrap();
+        let ptr = self.allocator.call(store, len).unwrap(); // FIXME: unwrap?
 
         unsafe {
             let data = self.memory.data_unchecked_mut();
@@ -578,13 +584,13 @@ impl<'a> MessageBuffer<'a> {
 }
 
 impl WasmPlugin {
-    fn message_buffer(&self) -> errors::Result<MessageBuffer> {
+    fn message_buffer(&mut self) -> errors::Result<MessageBuffer> {
+        let allocator = self.instance
+            .get_typed_func::<u32, u32, _>(&mut self.store, "allocate_message_buffer")
+            .map_err(WasmPluginError::WasmerRuntimeError)?;
         Ok(MessageBuffer {
-            memory: self.instance.exports.get_memory("memory")?,
-            allocator: self
-                .instance
-                .exports
-                .get::<Function>("allocate_message_buffer")?,
+            // memory: &self.instance.get_memory(&mut self.store, "memory").expect("FIXME"),
+            allocator: &allocator,
             garbage: vec![],
         })
     }
@@ -621,7 +627,7 @@ impl WasmPlugin {
             .instance
             .exports
             .get_function(&format!("wasm_plugin_exported__{}", fn_name))
-            .unwrap_or_else(|_| panic!("Unable to find function {}", fn_name));
+            .unwrap_or_else(|_| panic!("Unable to find function {}", fn_name)); // FIXME
 
         let ptr = if let Some(fat_ptr) = input_buffer {
             f.native::<(u32, u32), u64>()?
@@ -641,7 +647,7 @@ impl WasmPlugin {
                 .instance
                 .exports
                 .get_function("free_message_buffer")
-                .unwrap_or_else(|_| panic!("Unable to find function 'free_message_buffer'"))
+                .unwrap_or_else(|_| panic!("Unable to find function 'free_message_buffer'")) // FIXME
                 .native::<(u32, u32), ()>()?;
             for fat_ptr in garbage {
                 f.call(fat_ptr.ptr() as u32, fat_ptr.len() as u32)?
@@ -665,16 +671,17 @@ impl WasmPlugin {
 }
 
 #[cfg(feature = "inject_getrandom")]
-fn getrandom_shim(env: &Env<()>, ptr: u32, len: u32) {
-    if let Some(memory) = env.memory_ref() {
-        let view: MemoryView<u8> = memory.view();
-        let mut buff: Vec<u8> = vec![0; len as usize];
-        getrandom::getrandom(&mut buff).unwrap();
-        for (dst, src) in view[ptr as usize..ptr as usize + len as usize]
-            .iter()
-            .zip(buff)
-        {
-            dst.set(src);
-        }
-    }
+fn getrandom_shim(mut env: Caller<'_, ()>, ptr: u32, len: u32) {
+    // FIXME
+    // if let Some(Extern::Memory(memory)) = env.get_export("memory") {
+    //     let view: MemoryView<u8> = memory.view();
+    //     let mut buff: Vec<u8> = vec![0; len as usize];
+    //     getrandom::getrandom(&mut buff).unwrap();
+    //     for (dst, src) in view[ptr as usize..ptr as usize + len as usize]
+    //         .iter()
+    //         .zip(buff)
+    //     {
+    //         dst.set(src);
+    //     }
+    // }
 }
