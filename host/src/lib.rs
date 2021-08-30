@@ -75,7 +75,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use wasmtime::{Func, Instance, Memory, Module, Store, Engine, Linker, Caller, TypedFunc, AsContextMut};
+use wasmtime::{Func, Instance, Memory, Module, Store, Engine, Linker, Caller, TypedFunc, AsContextMut, AsContext};
 pub use wasmtime::{Extern};
 
 #[allow(missing_docs)]
@@ -267,22 +267,22 @@ impl WasmPluginBuilder {
     ) -> Self {
         if F::has_arg() {
             let f = if F::has_return() {
-                let wrapped = move |env: Caller<'_, Env<()>>, ptr: u32, len: u32| -> u64 {
+                let wrapped = move |mut env: Caller<'_, Env<()>>, ptr: u32, len: u32| -> u64 {
                     let mut buffer = env.data().message_buffer();
                     let r = value
-                        .call_with_input(&mut buffer, ptr as usize, len as usize)
+                        .call_with_input(&mut env, &mut buffer, ptr as usize, len as usize)
                         .unwrap()
                         .map(|p| p.0)
                         .unwrap_or(0);
                     env.data().garbage.lock().unwrap().extend(buffer.garbage.drain(..));
                     r
                 };
-                Func::wrap(&mut self.store, wrapped)
+            Func::wrap(&mut self.store, wrapped)
             } else {
-                let wrapped = move |env: Caller<'_, Env<()>>, ptr: u32, len: u32| {
+                let wrapped = move |mut env: Caller<'_, Env<()>>, ptr: u32, len: u32| {
                     let mut buffer = env.data().message_buffer();
                     value
-                        .call_with_input(&mut buffer, ptr as usize, len as usize)
+                        .call_with_input(&mut env, &mut buffer, ptr as usize, len as usize)
                         .unwrap();
                     env.data().garbage.lock().unwrap().extend(buffer.garbage.drain(..));
                 };
@@ -291,10 +291,10 @@ impl WasmPluginBuilder {
             self.import(name, f)
         } else {
             let f = if F::has_return() {
-                let wrapped = move |env: Caller<'_, Env<()>>| -> u64 {
+                let wrapped = move |mut env: Caller<'_, Env<()>>| -> u64 {
                     let mut buffer = env.data().message_buffer();
                     let r = value
-                        .call_without_input(&mut buffer)
+                        .call_without_input(&mut env, &mut buffer)
                         .unwrap()
                         .map(|p| p.0)
                         .unwrap_or(0);
@@ -303,9 +303,9 @@ impl WasmPluginBuilder {
                 };
                 Func::wrap(&mut self.store, wrapped)
             } else {
-                let wrapped = move |env: Caller<'_, Env<()>>| {
+                let wrapped = move |mut env: Caller<'_, Env<()>>| {
                     let mut buffer = env.data().message_buffer();
-                    value.call_without_input(&mut buffer).unwrap();
+                    value.call_without_input(&mut env, &mut buffer).unwrap();
                     env.data().garbage.lock().unwrap().extend(buffer.garbage.drain(..));
                 };
                 Func::wrap(&mut self.store, wrapped)
@@ -330,102 +330,102 @@ impl WasmPluginBuilder {
 
 /// A marker trait for Fn types who's arguments and return type can be
 /// serialized and are thus safe to import into a plugin;
-pub trait ImportableFnWithContext<C, Arglist> {
-    #[doc(hidden)]
-    fn has_arg() -> bool;
-    #[doc(hidden)]
-    fn has_return() -> bool;
-    #[doc(hidden)]
-    fn call_with_input(
-        &self,
-        message_buffer: &mut MessageBuffer,
-        ptr: usize,
-        len: usize,
-        ctx: &C,
-    ) -> errors::Result<Option<FatPointer>>;
-    #[doc(hidden)]
-    fn call_without_input(
-        &self,
-        message_buffer: &mut MessageBuffer,
-        ctx: &C,
-    ) -> errors::Result<Option<FatPointer>>;
-}
-
-impl<C, Args, ReturnType, F> ImportableFnWithContext<C, Args> for F
-where
-    F: Fn(&C, Args) -> ReturnType,
-    Args: Deserializable,
-    ReturnType: Serializable,
-{
-    fn has_arg() -> bool {
-        true
-    }
-    fn has_return() -> bool {
-        std::mem::size_of::<ReturnType>() > 0
-    }
-    fn call_with_input(
-        &self,
-        message_buffer: &mut MessageBuffer,
-        ptr: usize,
-        len: usize,
-        ctx: &C,
-    ) -> errors::Result<Option<FatPointer>> {
-        let message = message_buffer.read_message(ptr, len);
-        let result = self(ctx, Args::deserialize(&message)?);
-        if std::mem::size_of::<ReturnType>() > 0 {
-            // No need to write anything for ZSTs
-            let message = result.serialize()?;
-            Ok(Some(message_buffer.write_message(&message)))
-        } else {
-            Ok(None)
-        }
-    }
-
-    fn call_without_input(
-        &self,
-        _message_buffer: &mut MessageBuffer,
-        _ctx: &C,
-    ) -> errors::Result<Option<FatPointer>> {
-        unimplemented!("Requires argument")
-    }
-}
-
-impl<C, ReturnType, F> ImportableFnWithContext<C, NoArgs> for F
-where
-    F: Fn(&C) -> ReturnType,
-    ReturnType: Serializable,
-{
-    fn has_arg() -> bool {
-        false
-    }
-    fn has_return() -> bool {
-        std::mem::size_of::<ReturnType>() > 0
-    }
-    fn call_with_input(
-        &self,
-        _message_buffer: &mut MessageBuffer,
-        _ptr: usize,
-        _len: usize,
-        _ctx: &C,
-    ) -> errors::Result<Option<FatPointer>> {
-        unimplemented!("Must not supply argument")
-    }
-
-    fn call_without_input(
-        &self,
-        message_buffer: &mut MessageBuffer,
-        ctx: &C,
-    ) -> errors::Result<Option<FatPointer>> {
-        let result = self(ctx);
-        if std::mem::size_of::<ReturnType>() > 0 {
-            // No need to write anything for ZSTs
-            let message = result.serialize()?;
-            Ok(Some(message_buffer.write_message(&message)))
-        } else {
-            Ok(None)
-        }
-    }
-}
+// pub trait ImportableFnWithContext<C, Arglist> {
+//     #[doc(hidden)]
+//     fn has_arg() -> bool;
+//     #[doc(hidden)]
+//     fn has_return() -> bool;
+//     #[doc(hidden)]
+//     fn call_with_input(
+//         &self,
+//         message_buffer: &mut MessageBuffer,
+//         ptr: usize,
+//         len: usize,
+//         ctx: &C,
+//     ) -> errors::Result<Option<FatPointer>>;
+//     #[doc(hidden)]
+//     fn call_without_input(
+//         &self,
+//         message_buffer: &mut MessageBuffer,
+//         ctx: &C,
+//     ) -> errors::Result<Option<FatPointer>>;
+// }
+//
+// impl<C, Args, ReturnType, F> ImportableFnWithContext<C, Args> for F
+// where
+//     F: Fn(&C, Args) -> ReturnType,
+//     Args: Deserializable,
+//     ReturnType: Serializable,
+// {
+//     fn has_arg() -> bool {
+//         true
+//     }
+//     fn has_return() -> bool {
+//         std::mem::size_of::<ReturnType>() > 0
+//     }
+//     fn call_with_input(
+//         &self,
+//         message_buffer: &mut MessageBuffer,
+//         ptr: usize,
+//         len: usize,
+//         ctx: &C,
+//     ) -> errors::Result<Option<FatPointer>> {
+//         let message = message_buffer.read_message(ptr, len);
+//         let result = self(ctx, Args::deserialize(&message)?);
+//         if std::mem::size_of::<ReturnType>() > 0 {
+//             // No need to write anything for ZSTs
+//             let message = result.serialize()?;
+//             Ok(Some(message_buffer.write_message(&message)))
+//         } else {
+//             Ok(None)
+//         }
+//     }
+//
+//     fn call_without_input(
+//         &self,
+//         _message_buffer: &mut MessageBuffer,
+//         _ctx: &C,
+//     ) -> errors::Result<Option<FatPointer>> {
+//         unimplemented!("Requires argument")
+//     }
+// }
+//
+// impl<C, ReturnType, F> ImportableFnWithContext<C, NoArgs> for F
+// where
+//     F: Fn(&C) -> ReturnType,
+//     ReturnType: Serializable,
+// {
+//     fn has_arg() -> bool {
+//         false
+//     }
+//     fn has_return() -> bool {
+//         std::mem::size_of::<ReturnType>() > 0
+//     }
+//     fn call_with_input(
+//         &self,
+//         _message_buffer: &mut MessageBuffer,
+//         _ptr: usize,
+//         _len: usize,
+//         _ctx: &C,
+//     ) -> errors::Result<Option<FatPointer>> {
+//         unimplemented!("Must not supply argument")
+//     }
+//
+//     fn call_without_input(
+//         &self,
+//         message_buffer: &mut MessageBuffer,
+//         ctx: &C,
+//     ) -> errors::Result<Option<FatPointer>> {
+//         let result = self(ctx);
+//         if std::mem::size_of::<ReturnType>() > 0 {
+//             // No need to write anything for ZSTs
+//             let message = result.serialize()?;
+//             Ok(Some(message_buffer.write_message(&message)))
+//         } else {
+//             Ok(None)
+//         }
+//     }
+// }
 
 /// A marker trait for Fn types who's arguments and return type can be
 /// serialized and are thus safe to import into a plugin;
@@ -435,15 +435,17 @@ pub trait ImportableFn<ArgList> {
     #[doc(hidden)]
     fn has_return() -> bool;
     #[doc(hidden)]
-    fn call_with_input(
+    fn call_with_input<S: AsContextMut>(
         &self,
+        store: S,
         message_buffer: &mut MessageBuffer,
         ptr: usize,
         len: usize,
     ) -> errors::Result<Option<FatPointer>>;
     #[doc(hidden)]
-    fn call_without_input(
+    fn call_without_input<S: AsContextMut>(
         &self,
+        store: S,
         message_buffer: &mut MessageBuffer,
     ) -> errors::Result<Option<FatPointer>>;
 }
@@ -460,25 +462,33 @@ where
     fn has_return() -> bool {
         std::mem::size_of::<ReturnType>() > 0
     }
-    fn call_with_input(
+    fn call_with_input<S: AsContextMut>(
         &self,
+        store: S,
         message_buffer: &mut MessageBuffer,
         ptr: usize,
         len: usize,
     ) -> errors::Result<Option<FatPointer>> {
-        let message = message_buffer.read_message(ptr, len);
+        // MessageBuffer {
+        //     allocator: self.allocator.as_ref().unwrap(), // FIXME: these were get_unchecked
+        //     memory: self.memory.as_ref().unwrap(),
+        //     garbage: vec![],
+        // }
+
+        let message = message_buffer.read_message(ptr, len, &store);
         let result = self(Args::deserialize(&message)?);
         if std::mem::size_of::<ReturnType>() > 0 {
             let message = result.serialize()?;
-            Ok(Some(message_buffer.write_message(&message)))
+            Ok(Some(message_buffer.write_message(&message, store)))
         } else {
             // No need to write anything for ZSTs
             Ok(None)
         }
     }
 
-    fn call_without_input(
+    fn call_without_input<S: AsContextMut>(
         &self,
+        _store: S,
         _message_buffer: &mut MessageBuffer,
     ) -> errors::Result<Option<FatPointer>> {
         unimplemented!("Requires argument")
@@ -499,8 +509,9 @@ where
     fn has_return() -> bool {
         std::mem::size_of::<ReturnType>() > 0
     }
-    fn call_with_input(
+    fn call_with_input<S: AsContextMut>(
         &self,
+        _store: S,
         _message_buffer: &mut MessageBuffer,
         _ptr: usize,
         _len: usize,
@@ -508,15 +519,16 @@ where
         unimplemented!("Must not supply argument")
     }
 
-    fn call_without_input(
+    fn call_without_input<S: AsContextMut>(
         &self,
+        store: S,
         message_buffer: &mut MessageBuffer,
     ) -> errors::Result<Option<FatPointer>> {
         let result = self();
         if std::mem::size_of::<ReturnType>() > 0 {
             // No need to write anything for ZSTs
             let message = result.serialize()?;
-            Ok(Some(message_buffer.write_message(&message)))
+            Ok(Some(message_buffer.write_message(&message, store)))
         } else {
             Ok(None)
         }
@@ -538,7 +550,7 @@ pub struct MessageBuffer<'a> {
 }
 
 impl<'a> MessageBuffer<'a> {
-    fn write_message<S: AsContextMut>(&mut self, message: &[u8], store: S) -> FatPointer {
+    fn write_message<S: AsContextMut>(&mut self, message: &[u8], mut store: S) -> FatPointer {
         let len = message.len() as u32;
 
         // let ptr = self
@@ -547,11 +559,11 @@ impl<'a> MessageBuffer<'a> {
         //     .unwrap()
         //     .call(len as u32)
         //     .unwrap();
-        let ptr = self.allocator.call(store, len).unwrap(); // FIXME: unwrap?
+        let ptr = self.allocator.call(&mut store, len).unwrap(); // FIXME: unwrap?
 
         unsafe {
-            let data = self.memory.data_unchecked_mut();
-            data[ptr as usize..ptr as usize + len as usize].copy_from_slice(&message);
+            let data = self.memory.data_mut(&mut store); // FIXME: use memory.write instead of unsafe
+            data[ptr as usize..ptr as usize + len as usize].copy_from_slice(&message); // Might panic if memory isn't large enough. Is this an issue?
         }
 
         let mut fat_ptr = FatPointer(0);
@@ -561,25 +573,17 @@ impl<'a> MessageBuffer<'a> {
         fat_ptr
     }
 
-    fn read_message(&self, ptr: usize, len: usize) -> Vec<u8> {
+    fn read_message<S: AsContext>(&self, ptr: usize, len: usize, store: S) -> Vec<u8> {
         let mut buff: Vec<u8> = vec![0; len];
-        unsafe {
-            let data = self.memory.data_unchecked();
-            buff.copy_from_slice(&data[ptr..ptr + len]);
-        }
+        self.memory.read(&store, ptr, &mut buff).expect("FIXME");
         buff
     }
 
-    fn read_message_from_fat_pointer(&self, fat_ptr: u64) -> Vec<u8> {
-        unsafe {
-            let data = self.memory.data_unchecked();
-            let fat_ptr = FatPointer(fat_ptr);
-            let mut buff: Vec<u8> = vec![0; fat_ptr.len() as usize];
-            buff.copy_from_slice(
-                &data[fat_ptr.ptr() as usize..fat_ptr.ptr() as usize + fat_ptr.len() as usize],
-            );
-            buff
-        }
+    fn read_message_from_fat_pointer<S: AsContext>(&self, fat_ptr: u64, store: S) -> Vec<u8> {
+        let fat_ptr = FatPointer(fat_ptr);
+        let mut buff: Vec<u8> = vec![0; fat_ptr.len() as usize];
+        self.memory.read(&store, fat_ptr.ptr() as usize, &mut buff).expect("FIXME");
+        buff
     }
 }
 
@@ -589,7 +593,7 @@ impl WasmPlugin {
             .get_typed_func::<u32, u32, _>(&mut self.store, "allocate_message_buffer")
             .map_err(WasmPluginError::WasmerRuntimeError)?;
         Ok(MessageBuffer {
-            // memory: &self.instance.get_memory(&mut self.store, "memory").expect("FIXME"),
+            memory: &self.instance.get_memory(&mut self.store, "memory").expect("FIXME"),
             allocator: &allocator,
             garbage: vec![],
         })
@@ -601,7 +605,7 @@ impl WasmPlugin {
     /// Deserialization of the return value depends on the type being known
     /// at the call site.
     pub fn call_function_with_argument<ReturnType, Args>(
-        &self,
+        &mut self,
         fn_name: &str,
         args: &Args,
     ) -> errors::Result<ReturnType>
@@ -611,7 +615,7 @@ impl WasmPlugin {
     {
         let message = args.serialize()?;
         let mut buffer = self.message_buffer()?;
-        let ptr = buffer.write_message(&message);
+        let ptr = buffer.write_message(&message, &mut self.store);
 
         let buff = self.call_function_raw(fn_name, Some(ptr))?;
         drop(buffer);
@@ -619,23 +623,23 @@ impl WasmPlugin {
     }
 
     fn call_function_raw(
-        &self,
+        &mut self,
         fn_name: &str,
         input_buffer: Option<FatPointer>,
     ) -> errors::Result<Vec<u8>> {
         let f = self
             .instance
-            .exports
-            .get_function(&format!("wasm_plugin_exported__{}", fn_name))
-            .unwrap_or_else(|_| panic!("Unable to find function {}", fn_name)); // FIXME
+            // .exports(&mut self.store)
+            .get_func(&mut self.store, &format!("wasm_plugin_exported__{}", fn_name))
+            .unwrap_or_else(|| panic!("Unable to find function {}", fn_name)); // FIXME
 
         let ptr = if let Some(fat_ptr) = input_buffer {
-            f.native::<(u32, u32), u64>()?
-                .call(fat_ptr.ptr() as u32, fat_ptr.len() as u32)?
+            f.typed::<(u32, u32), u64, _>(&self.store).expect("FIXME: anyhow::Error")
+                .call(&mut self.store, (fat_ptr.ptr() as u32, fat_ptr.len() as u32)).expect("FIXME: trap")
         } else {
-            f.native::<(), u64>()?.call()?
+            f.typed::<(), u64, _>(&self.store).expect("FIXME: anyhow::Error").call(&mut self.store, ()).expect("FIXME: trap")
         };
-        let result = self.message_buffer()?.read_message_from_fat_pointer(ptr);
+        let result = self.message_buffer()?.read_message_from_fat_pointer(ptr, &self.store);
 
         let mut garbage: Vec<_> = self.garbage.lock().unwrap().drain(..).collect();
 
@@ -645,12 +649,11 @@ impl WasmPlugin {
         if !garbage.is_empty() {
             let f = self
                 .instance
-                .exports
-                .get_function("free_message_buffer")
-                .unwrap_or_else(|_| panic!("Unable to find function 'free_message_buffer'")) // FIXME
-                .native::<(u32, u32), ()>()?;
+                // .exports(&mut self.store)
+                .get_typed_func::<(u32, u32), (), _>(&mut self.store, "free_message_buffer")
+                .unwrap_or_else(|_| panic!("Unable to find function 'free_message_buffer'")); // FIXME
             for fat_ptr in garbage {
-                f.call(fat_ptr.ptr() as u32, fat_ptr.len() as u32)?
+                f.call(&mut self.store, (fat_ptr.ptr() as u32, fat_ptr.len() as u32), ).expect("FIXME: trap")
             }
         }
 
