@@ -11,7 +11,7 @@ keywords = ["WASM", "plugin"]
 categories = ["game-development", "wasm"]
 
 [features]
-default = ["inject_getrandom", "serialize_bincode"]
+default = ["serialize_bincode"]
 inject_getrandom = ["getrandom"]
 serialize_bincode = ["bincode", "serde"]
 serialize_json = ["serde_json", "serde"]

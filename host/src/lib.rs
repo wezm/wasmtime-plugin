@@ -124,8 +124,8 @@ impl<C: Send + Sync + Clone + 'static> Env<C> {
     // A new message buffer from this Env
     fn message_buffer(&self) -> MessageBuffer {
         MessageBuffer {
-            allocator: self.allocator.as_ref().unwrap(), // FIXME: these were get_unchecked
-            memory: self.memory.as_ref().unwrap(),
+            allocator: self.allocator.unwrap(), // FIXME: these were get_unchecked
+            memory: self.memory.unwrap(),
             garbage: vec![],
         }
     }
@@ -156,7 +156,7 @@ impl WasmPluginBuilder {
         let garbage: Arc<Mutex<Vec<FatPointer>>> = Default::default();
         let mut store = Store::new(&engine, Env::new(Arc::clone(&garbage), ()));
         // let mut env = wasmtime::Exports::new();
-        linker.func_wrap("", "abort", |_: u32, _: u32, _: i32, _: i32| {}).unwrap(); // FIXME note;
+        linker.func_wrap("env", "abort", |_: u32, _: u32, _: i32, _: i32| {}).unwrap(); // FIXME note; "env"
 
         #[cfg(feature = "inject_getrandom")]
         {
@@ -181,7 +181,7 @@ impl WasmPluginBuilder {
 
     fn import(mut self, name: impl ToString, value: impl Into<Extern>) -> Self {
         let name = format!("wasm_plugin_imported__{}", name.to_string()); // TODO: Use module name instead of adding prefix
-        self.env.define("", &name, value).unwrap(); // FIXME note unwrap
+        self.env.define("env", &name, value).unwrap(); // FIXME note unwrap, "env"
         self
     }
 
@@ -320,6 +320,11 @@ impl WasmPluginBuilder {
         // import_object.register("env", self.env);
         let instance = self.env.instantiate(&mut self.store, &self.module)
             .map_err(WasmPluginError::WasmerInstantiationError)?;
+        let allocator = instance
+            .get_typed_func::<u32, u32, _>(&mut self.store, "allocate_message_buffer")
+            .map_err(WasmPluginError::WasmerRuntimeError)?;
+        self.store.data_mut().allocator = Some(allocator);
+        self.store.data_mut().memory = Some(instance.get_memory(&mut self.store, "memory").expect("FIXME"));
         Ok(WasmPlugin {
             store: self.store,
             instance,
@@ -543,13 +548,13 @@ pub struct WasmPlugin {
 }
 
 #[doc(hidden)]
-pub struct MessageBuffer<'a> {
-    memory: &'a Memory,
-    allocator: &'a TypedFunc<u32, u32>,
+pub struct MessageBuffer {
+    memory: Memory,
+    allocator: TypedFunc<u32, u32>,
     garbage: Vec<FatPointer>,
 }
 
-impl<'a> MessageBuffer<'a> {
+impl MessageBuffer {
     fn write_message<S: AsContextMut>(&mut self, message: &[u8], mut store: S) -> FatPointer {
         let len = message.len() as u32;
 
@@ -593,8 +598,8 @@ impl WasmPlugin {
             .get_typed_func::<u32, u32, _>(&mut self.store, "allocate_message_buffer")
             .map_err(WasmPluginError::WasmerRuntimeError)?;
         Ok(MessageBuffer {
-            memory: &self.instance.get_memory(&mut self.store, "memory").expect("FIXME"),
-            allocator: &allocator,
+            memory: self.instance.get_memory(&mut self.store, "memory").expect("FIXME"),
+            allocator,
             garbage: vec![],
         })
     }
