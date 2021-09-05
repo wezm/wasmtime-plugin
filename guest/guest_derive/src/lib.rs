@@ -29,8 +29,8 @@ fn impl_function_export(ast: &syn::ItemFn) -> TokenStream {
         quote! {
             #[no_mangle]
             pub extern "C" fn #remote_name() -> u64 {
-                let (ptr, len) = wasm_plugin_guest::write_message(&#name());
-                let mut fat = wasm_plugin_guest::FatPointer(0);
+                let (ptr, len) = wasmtime_plugin_guest::write_message(&#name());
+                let mut fat = wasmtime_plugin_guest::FatPointer(0);
                 fat.set_ptr(ptr as u32);
                 fat.set_len(len as u32);
                 fat.0
@@ -63,10 +63,10 @@ fn impl_function_export(ast: &syn::ItemFn) -> TokenStream {
         quote! {
             #[no_mangle]
             pub extern "C" fn #remote_name(ptr: u32, len: u32) -> u64 {
-                let message:#argument_types = wasm_plugin_guest::read_message(ptr as usize, len as usize);
+                let message:#argument_types = wasmtime_plugin_guest::read_message(ptr as usize, len as usize);
 
-                let (ptr, len) = wasm_plugin_guest::write_message(&#name(#call));
-                let mut fat = wasm_plugin_guest::FatPointer(0);
+                let (ptr, len) = wasmtime_plugin_guest::write_message(&#name(#call));
+                let mut fat = wasmtime_plugin_guest::FatPointer(0);
                 fat.set_ptr(ptr as u32);
                 fat.set_len(len as u32);
                 fat.0
@@ -134,8 +134,8 @@ fn impl_import_functions(ast: &FnImports) -> TokenStream {
                             let fat_ptr = unsafe {
                                 #remote_name()
                             };
-                            let fat_ptr = wasm_plugin_guest::FatPointer(fat_ptr);
-                            let message:(#ty) = wasm_plugin_guest::read_message(fat_ptr.ptr() as usize, fat_ptr.len() as usize);
+                            let fat_ptr = wasmtime_plugin_guest::FatPointer(fat_ptr);
+                            let message:(#ty) = wasmtime_plugin_guest::read_message(fat_ptr.ptr() as usize, fat_ptr.len() as usize);
                             message
                         }
                     }
@@ -171,7 +171,7 @@ fn impl_import_functions(ast: &FnImports) -> TokenStream {
                 syn::ReturnType::Default => {
                     quote! {
                         #f {
-                            let (ptr, len) = wasm_plugin_guest::write_message(&#message);
+                            let (ptr, len) = wasmtime_plugin_guest::write_message(&#message);
                             unsafe {
                                 #remote_name(ptr as u32, len as u32);
                             }
@@ -181,12 +181,12 @@ fn impl_import_functions(ast: &FnImports) -> TokenStream {
                 syn::ReturnType::Type(_, ty) => {
                     quote! {
                         #f {
-                            let (ptr, len) = wasm_plugin_guest::write_message(&(#message));
+                            let (ptr, len) = wasmtime_plugin_guest::write_message(&(#message));
                             let fat_ptr = unsafe {
                                 #remote_name(ptr as u32, len as u32)
                             };
-                            let fat_ptr = wasm_plugin_guest::FatPointer(fat_ptr);
-                            let message:(#ty) = wasm_plugin_guest::read_message(fat_ptr.ptr() as usize, fat_ptr.len() as usize);
+                            let fat_ptr = wasmtime_plugin_guest::FatPointer(fat_ptr);
+                            let message:(#ty) = wasmtime_plugin_guest::read_message(fat_ptr.ptr() as usize, fat_ptr.len() as usize);
                             message
                         }
                     }
