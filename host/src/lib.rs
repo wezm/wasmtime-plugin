@@ -130,7 +130,7 @@ impl<C: Send + Sync + Clone + 'static> Env<C> {
 pub struct WasmPluginBuilder {
     module: Module,
     store: Store<Env<()>>,
-    env: Linker<Env<()>>,
+    linker: Linker<Env<()>>,
     // TODO: Can we do this without the lock?
     garbage: Arc<Mutex<Vec<FatPointer>>>,
 }
@@ -150,7 +150,7 @@ impl WasmPluginBuilder {
             .map_err(WasmPluginError::WasmerCompileError)?;
         let garbage: Arc<Mutex<Vec<FatPointer>>> = Default::default();
         let store = Store::new(&engine, Env::new(Arc::clone(&garbage), ()));
-        linker.func_wrap("env", "abort", |_: u32, _: u32, _: i32, _: i32| {}).unwrap(); // FIXME note; "env"
+        linker.func_wrap("env", "abort", |_: u32, _: u32, _: i32, _: i32| {}).unwrap(); // FIXME note
 
         #[cfg(feature = "inject_getrandom")]
         {
@@ -168,14 +168,14 @@ impl WasmPluginBuilder {
         Ok(Self {
             module,
             store,
-            env: linker,
+            linker: linker,
             garbage,
         })
     }
 
     fn import(mut self, name: impl ToString, value: impl Into<Extern>) -> Self {
         let name = format!("wasm_plugin_imported__{}", name.to_string()); // TODO: Use module name instead of adding prefix
-        self.env.define("env", &name, value).unwrap(); // FIXME note unwrap, "env"
+        self.linker.define("env", &name, value).unwrap(); // FIXME note unwrap
         self
     }
 
@@ -310,7 +310,7 @@ impl WasmPluginBuilder {
 
     /// Finalize the builder and create the WasmPlugin ready for use.
     pub fn finish(mut self) -> errors::Result<WasmPlugin> {
-        let instance = self.env.instantiate(&mut self.store, &self.module)
+        let instance = self.linker.instantiate(&mut self.store, &self.module)
             .map_err(WasmPluginError::WasmerInstantiationError)?;
         let allocator = instance
             .get_typed_func::<u32, u32, _>(&mut self.store, "allocate_message_buffer")
