@@ -1,4 +1,4 @@
-use wasm_plugin_host::WasmPluginBuilder;
+use wasmtime_plugin_host::WasmPluginBuilder;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut plugin = WasmPluginBuilder::from_file(

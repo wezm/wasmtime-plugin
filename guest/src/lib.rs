@@ -22,7 +22,7 @@
 use std::mem::ManuallyDrop;
 
 mod serialization;
-pub use wasm_plugin_guest_derive::{export_function, import_functions};
+pub use wasmtime_plugin_guest_derive::{export_function, import_functions};
 
 bitfield::bitfield! {
     #[doc(hidden)]
