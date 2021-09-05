@@ -20,7 +20,6 @@ serialize_nanoserde_json = ["nanoserde"]
 [dependencies]
 anyhow = "1"
 wasmtime = "0.28.0"
-once_cell = "1"
 getrandom = { version = "0.2", optional = true }
 serde = { version = "1", optional = true }
 bincode = { version = "1", optional = true }
