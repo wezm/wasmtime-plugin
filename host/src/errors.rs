@@ -2,7 +2,7 @@
 pub enum WasmPluginError {
     /// A problem compiling the plugin's WASM source
     WasmCompileError(anyhow::Error),
-    /// A problem instantiating the Wasmer runtime
+    /// A problem instantiating the Wasm runtime
     WasmInstantiationError(anyhow::Error),
     /// A problem interacting with the plugin
     WasmRuntimeError(anyhow::Error),
@@ -45,6 +45,18 @@ impl core::fmt::Display for WasmPluginError {
             #[cfg(feature = "serialize_nanoserde_json")]
             WasmPluginError::FromUtf8Error(e) => e.fmt(f),
         }
+    }
+}
+
+impl From<wasmtime::MemoryAccessError> for WasmPluginError {
+    fn from(e: wasmtime::MemoryAccessError) -> WasmPluginError {
+        WasmPluginError::WasmRuntimeError(anyhow::Error::from(e))
+    }
+}
+
+impl From<wasmtime::Trap> for WasmPluginError {
+    fn from(trap: wasmtime::Trap) -> WasmPluginError {
+        WasmPluginError::WasmRuntimeError(anyhow::Error::from(trap))
     }
 }
 
