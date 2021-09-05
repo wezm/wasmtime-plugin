@@ -84,7 +84,6 @@ pub mod errors;
 pub mod serialization;
 use bitfield::bitfield;
 use serialization::{Deserializable, Serializable};
-use once_cell::sync::{Lazy, OnceCell};
 use crate::errors::WasmPluginError;
 
 bitfield! {
@@ -101,9 +100,7 @@ struct Env<C>
 where
     C: Send + Sync + Clone + 'static,
 {
-    // #[wasmtime(export(name = "allocate_message_buffer"))]
     allocator: Option<TypedFunc<u32, u32>>,
-    // #[wasmtime(export)]
     memory: Option<Memory>,
     garbage: Arc<Mutex<Vec<FatPointer>>>,
     ctx: C,
@@ -114,8 +111,6 @@ impl<C: Send + Sync + Clone + 'static> Env<C> {
         Self {
             allocator: None,
             memory: None,
-            // allocator: Default::default(),
-            // memory: Default::default(),
             garbage,
             ctx,
         }
@@ -154,8 +149,7 @@ impl WasmPluginBuilder {
         let module = Module::new(&engine, source)
             .map_err(WasmPluginError::WasmerCompileError)?;
         let garbage: Arc<Mutex<Vec<FatPointer>>> = Default::default();
-        let mut store = Store::new(&engine, Env::new(Arc::clone(&garbage), ()));
-        // let mut env = wasmtime::Exports::new();
+        let store = Store::new(&engine, Env::new(Arc::clone(&garbage), ()));
         linker.func_wrap("env", "abort", |_: u32, _: u32, _: i32, _: i32| {}).unwrap(); // FIXME note; "env"
 
         #[cfg(feature = "inject_getrandom")]
@@ -316,8 +310,6 @@ impl WasmPluginBuilder {
 
     /// Finalize the builder and create the WasmPlugin ready for use.
     pub fn finish(mut self) -> errors::Result<WasmPlugin> {
-        // let mut import_object = wasmtime::ImportObject::new();
-        // import_object.register("env", self.env);
         let instance = self.env.instantiate(&mut self.store, &self.module)
             .map_err(WasmPluginError::WasmerInstantiationError)?;
         let allocator = instance
