@@ -1,14 +1,13 @@
 [package]
-name = "wasm_plugin_guest"
-version = "0.1.5"
-authors = ["Alec Deason <wasm_plugin@tinycountry.com>"]
+name = "wasmtime_plugin_guest"
+version = "0.1.0"
 edition = "2018"
 license = "MIT"
 readme = "README.md"
-repository = "https://github.com/alec-deason/wasm_plugin/tree/main/guest"
-description = "A low-ish level tool for easily writing WASM based plugins"
-keywords = ["WASM", "plugin"]
-categories = ["game-development", "wasm"]
+repository = "https://github.com/wezm/wasmtime-plugin/tree/main/guest"
+description = "A low-ish level tool for easily writing WASM based plugins that uses Wasmtime"
+keywords = ["wasm", "plugin"]
+categories = ["wasm"]
 
 [features]
 default = ["serialize_bincode"]
@@ -19,7 +18,7 @@ serialize_nanoserde_json = ["nanoserde"]
 
 
 [dependencies]
-wasm_plugin_guest_derive = "0.1.5"
+wasmtime_plugin_guest_derive = "0.1.1"
 getrandom = { version = "0.2", features = ["custom"], optional = true }
 serde = { version = "1", optional = true }
 bincode = { version = "1", optional = true }

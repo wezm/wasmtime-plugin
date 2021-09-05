@@ -9,4 +9,4 @@ publish = false
 crate-type = ["cdylib"]
 
 [dependencies]
-wasm_plugin_guest = { path = "../../guest" }
+wasmtime_plugin_guest = { path = "../../guest" }

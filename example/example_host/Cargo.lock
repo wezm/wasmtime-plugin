@@ -363,7 +363,7 @@ dependencies = [
 name = "example_host"
 version = "0.1.0"
 dependencies = [
- "wasm_plugin_host",
+ "wasmtime_plugin_host",
 ]
 
 [[package]]
@@ -915,17 +915,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fd6fbd9a79829dd1ad0cc20627bf1ed606756a7f77edff7b66b7064f9cb327c6"
 
 [[package]]
-name = "wasm_plugin_host"
-version = "0.1.7"
-dependencies = [
- "anyhow",
- "bincode",
- "bitfield",
- "serde",
- "wasmtime",
-]
-
-[[package]]
 name = "wasmparser"
 version = "0.78.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1135,6 +1124,17 @@ dependencies = [
  "wasmtime-environ",
  "wasmtime-fiber",
  "winapi",
+]
+
+[[package]]
+name = "wasmtime_plugin_host"
+version = "0.1.7"
+dependencies = [
+ "anyhow",
+ "bincode",
+ "bitfield",
+ "serde",
+ "wasmtime",
 ]
 
 [[package]]
