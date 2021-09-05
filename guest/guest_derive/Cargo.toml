@@ -1,13 +1,12 @@
 [package]
-name = "wasm_plugin_guest_derive"
-version = "0.1.5"
-authors = ["Alec Deason <wasm_plugin@tinycountry.com>"]
+name = "wasmtime_plugin_guest_derive"
+version = "0.1.0"
 edition = "2018"
 license = "MIT"
-repository = "https://github.com/alec-deason/wasm_plugin/tree/main/guest/guest_derive"
-description = "A low-ish level tool for easily writing WASM based plugins"
-keywords = ["WASM", "plugin"]
-categories = ["game-development", "wasm"]
+repository = "https://github.com/wezm/wasmtime-plugin/tree/main/guest/guest_derive"
+description = "Attribute macros used by wasmtime_plugin_guest"
+keywords = ["wasm", "plugin"]
+categories = ["wasm"]
 
 [lib]
 proc-macro = true
