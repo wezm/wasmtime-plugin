@@ -1,0 +1,24 @@
+task:
+  name: Build (Alpine Linux)
+  container:
+    image: alpine:3.14
+    cpu: 8
+  environment:
+    RUSTFLAGS: "-C target-feature=-crt-static"
+    CARGO_TARGET_DIR: "target" # Use a shared target dir
+    PATH: "$HOME/.cargo/bin:$PATH"
+  cargo_cache:
+    folder: $HOME/.cargo/registry
+    fingerprint_script: cat example/example_assemblyscript_host/Cargo.lock example/example_guest/Cargo.lock example/example_host/Cargo.lock guest/Cargo.lock guest/guest_derive/Cargo.lock host/Cargo.lock
+  install_script:
+    - apk update && apk add curl git gcc musl-dev
+    - curl https://sh.rustup.rs -sSf | sh -s -- -y --profile minimal --default-toolchain 1.54.0 --target wasm32-unknown-unknown
+  build_host_script:
+    - cargo build --manifest-path host/Cargo.toml
+  build_guest_script:
+    - cargo build --manifest-path guest/Cargo.toml
+  build_guest_example_script:
+    - cargo build --manifest-path example/example_guest/Cargo.toml --target wasm32-unknown-unknown
+  run_host_example_script:
+    - cargo run --manifest-path example/example_host/Cargo.toml -- target/wasm32-unknown-unknown/debug/example_guest.wasm
+  before_cache_script: rm -rf $HOME/.cargo/registry/index
