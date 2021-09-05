@@ -1,7 +1,7 @@
-#![doc(html_root_url = "https://docs.rs/wasm_plugin_guest_derive/0.1.5")]
 #![deny(missing_docs)]
 
-//! This crate provides attribute macros used by [wasm_plugin_guest](https://crates.io/crates/wasm_plugin_guest)
+//! This crate provides attribute macros used by
+//! [wasmtime_plugin_guest](https://crates.io/crates/wasmtime_plugin_guest)
 
 use proc_macro::TokenStream;
 extern crate proc_macro;
@@ -14,7 +14,7 @@ use quote::{format_ident, quote};
 ///
 /// The name of the exported function will be mangled to
 /// `wasm_plugin_exported__ORIGINAL_NAME` The exported function is only
-/// intended to be used by [wasm_plugin_host](https://crates.io/crates/wasm_plugin_host)
+/// intended to be used by [wasmtime_plugin_host](https://crates.io/crates/wasmtime_plugin_host)
 #[proc_macro_attribute]
 pub fn export_function(_args: TokenStream, input: TokenStream) -> TokenStream {
     let ast = syn::parse_macro_input!(input as syn::ItemFn);
@@ -105,7 +105,7 @@ impl syn::parse::Parse for FnImports {
 /// be called in the plugin code. The actual imported function, which normal
 /// code will never need to access, will have a mangled name:
 /// `wasm_plugin_imported__ORIGINAL_NAME` and is only intended to be called by
-/// by host code using [wasm_plugin_host](https://crates.io/crates/wasm_plugin_host)
+/// by host code using [wasmtime_plugin_host](https://crates.io/crates/wasmtime_plugin_host)
 #[proc_macro]
 pub fn import_functions(input: TokenStream) -> TokenStream {
     let ast = syn::parse_macro_input!(input as FnImports);
