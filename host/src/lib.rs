@@ -147,7 +147,7 @@ impl WasmPluginBuilder {
         let mut linker = Linker::new(&engine);
         linker.allow_shadowing(true); // FIXME: Keep this?
         let module = Module::new(&engine, source)
-            .map_err(WasmPluginError::WasmerCompileError)?;
+            .map_err(WasmPluginError::WasmCompileError)?;
         let garbage: Arc<Mutex<Vec<FatPointer>>> = Default::default();
         let store = Store::new(&engine, Env::new(Arc::clone(&garbage), ()));
         linker.func_wrap("env", "abort", |_: u32, _: u32, _: i32, _: i32| {}).unwrap(); // FIXME note
@@ -311,10 +311,10 @@ impl WasmPluginBuilder {
     /// Finalize the builder and create the WasmPlugin ready for use.
     pub fn finish(mut self) -> errors::Result<WasmPlugin> {
         let instance = self.linker.instantiate(&mut self.store, &self.module)
-            .map_err(WasmPluginError::WasmerInstantiationError)?;
+            .map_err(WasmPluginError::WasmInstantiationError)?;
         let allocator = instance
             .get_typed_func::<u32, u32, _>(&mut self.store, "allocate_message_buffer")
-            .map_err(WasmPluginError::WasmerRuntimeError)?;
+            .map_err(WasmPluginError::WasmRuntimeError)?;
         self.store.data_mut().allocator = Some(allocator);
         self.store.data_mut().memory = Some(instance.get_memory(&mut self.store, "memory").expect("FIXME"));
         Ok(WasmPlugin {
@@ -588,7 +588,7 @@ impl WasmPlugin {
     fn message_buffer(&mut self) -> errors::Result<MessageBuffer> {
         let allocator = self.instance
             .get_typed_func::<u32, u32, _>(&mut self.store, "allocate_message_buffer")
-            .map_err(WasmPluginError::WasmerRuntimeError)?;
+            .map_err(WasmPluginError::WasmRuntimeError)?;
         Ok(MessageBuffer {
             memory: self.instance.get_memory(&mut self.store, "memory").expect("FIXME"),
             allocator,

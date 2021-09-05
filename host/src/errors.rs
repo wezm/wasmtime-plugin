@@ -1,13 +1,13 @@
 /// Error returned by WasmPlugin when loading plugins or calling functions.
 pub enum WasmPluginError {
     /// A problem compiling the plugin's WASM source
-    WasmerCompileError(anyhow::Error),
+    WasmCompileError(anyhow::Error),
     /// A problem instantiating the Wasmer runtime
-    WasmerInstantiationError(anyhow::Error),
+    WasmInstantiationError(anyhow::Error),
     /// A problem interacting with the plugin
-    WasmerRuntimeError(anyhow::Error),
+    WasmRuntimeError(anyhow::Error),
     /// A problem getting an export from the plugin
-    WasmerExportError(anyhow::Error),
+    WasmExportError(anyhow::Error),
     /// A problem loading the plugin's source from disk
     IoError(std::io::Error),
     /// A problems serializing an argument to send to one of the plugin's
@@ -34,10 +34,10 @@ impl core::fmt::Debug for WasmPluginError {
 impl core::fmt::Display for WasmPluginError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
-            WasmPluginError::WasmerCompileError(e) => e.fmt(f),
-            WasmPluginError::WasmerInstantiationError(e) => e.fmt(f),
-            WasmPluginError::WasmerRuntimeError(e) => e.fmt(f),
-            WasmPluginError::WasmerExportError(e) => e.fmt(f),
+            WasmPluginError::WasmCompileError(e) => e.fmt(f),
+            WasmPluginError::WasmInstantiationError(e) => e.fmt(f),
+            WasmPluginError::WasmRuntimeError(e) => e.fmt(f),
+            WasmPluginError::WasmExportError(e) => e.fmt(f),
             WasmPluginError::IoError(e) => e.fmt(f),
 
             WasmPluginError::SerializationError => write!(f, "There was a problem serializing the argument to the function call"),
