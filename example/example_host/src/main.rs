@@ -1,9 +1,14 @@
+use std::{env, process};
+
 use wasmtime_plugin_host::WasmPluginBuilder;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let mut plugin = WasmPluginBuilder::from_file(
-        "../example_guest/target/wasm32-unknown-unknown/debug/example_guest.wasm",
-    )?
+    let plugin_path = env::args().skip(1).next();
+    if plugin_path.is_none() {
+        eprintln!("Usage: example_host path/to/plugin.wasm");
+        process::exit(1);
+    }
+    let mut plugin = WasmPluginBuilder::from_file(plugin_path.unwrap())?
     .import_function("the_hosts_favorite_numbers", || {
         vec![0, 1, 42]
     })
